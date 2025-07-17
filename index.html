@@ -15,19 +15,31 @@
         .btn:focus { outline: none; ring: 3px; ring-offset: 2px; }
         .btn { transition: background-color 0.2s ease-in-out, transform 0.1s ease-in-out; }
         .btn:active { transform: scale(0.98); }
+        .progress-bar { background-color: #e0e0e0; border-radius: 9999px; overflow: hidden; }
+        .progress-bar-inner { background-color: #4299e1; height: 100%; transition: width 0.5s ease-in-out; }
+        .tab-btn { border-bottom: 3px solid transparent; }
+        .tab-btn.active { border-bottom-color: #4299e1; color: #4299e1; font-weight: 700; }
     </style>
 </head>
 <body class="bg-gray-100 font-sans text-gray-800">
 
-    <!-- ランク選択画面 -->
-    <div id="rank-selection-view" class="w-full max-w-lg mx-auto p-4">
+    <!-- 選択画面 -->
+    <div id="selection-view" class="w-full max-w-lg mx-auto p-4">
         <header class="text-center py-4">
             <h1 class="text-2xl font-bold">ビジネス英語ドリル</h1>
-            <p class="text-gray-600 mt-1">挑戦する重要度ランクを選択してください</p>
         </header>
 
-        <main id="rank-list" class="grid grid-cols-1 gap-4">
-            <!-- JavaScriptによってランクボタンがここに挿入されます -->
+        <!-- タブ切り替え -->
+        <div class="flex border-b mb-4">
+            <button id="tab-rank" class="tab-btn flex-1 py-2 text-center font-semibold text-gray-500">ランクから学ぶ</button>
+            <button id="tab-scene" class="tab-btn flex-1 py-2 text-center font-semibold text-gray-500">シーンから学ぶ</button>
+        </div>
+
+        <main>
+            <!-- ランク別リスト -->
+            <div id="rank-list" class="grid grid-cols-1 gap-4"></div>
+            <!-- シーン別リスト (最初は非表示) -->
+            <div id="scene-list" class="grid grid-cols-1 gap-4 hidden"></div>
         </main>
         
         <div class="mt-6 text-center">
@@ -40,7 +52,7 @@
     <!-- 練習画面 (最初は非表示) -->
     <div id="drill-view" class="w-full max-w-lg mx-auto p-4 flex-col h-screen hidden">
         <header class="text-center py-4 flex items-center">
-            <button id="back-to-ranks-btn" class="btn bg-gray-200 text-gray-700 px-3 py-1 rounded-md hover:bg-gray-300">&lt; 戻る</button>
+            <button id="back-to-selection-btn" class="btn bg-gray-200 text-gray-700 px-3 py-1 rounded-md hover:bg-gray-300">&lt; 戻る</button>
             <h1 id="drill-title" class="text-xl font-bold flex-grow"></h1>
         </header>
 
@@ -73,22 +85,28 @@
     
     <script>
         // --- DOM要素の取得 ---
-        const rankSelectionView = document.getElementById('rank-selection-view');
+        const selectionView = document.getElementById('selection-view');
         const drillView = document.getElementById('drill-view');
         const rankList = document.getElementById('rank-list');
+        const sceneList = document.getElementById('scene-list');
         const drillTitle = document.getElementById('drill-title');
-        const backToRanksBtn = document.getElementById('back-to-ranks-btn');
+        const backToSelectionBtn = document.getElementById('back-to-selection-btn');
         const japaneseSentenceEl = document.getElementById('japanese-sentence');
         const englishSentenceEl = document.getElementById('english-sentence');
         const answerAreaEl = document.getElementById('answer-area');
         const actionBtn = document.getElementById('action-btn');
         const randomDrillBtn = document.getElementById('random-drill-btn');
+        const tabRank = document.getElementById('tab-rank');
+        const tabScene = document.getElementById('tab-scene');
 
         // --- アプリの状態管理 ---
         let questionList = [];
         let currentQuestionIndex = 0;
         let isAnswerShown = false;
         let drillState = 'idle';
+        let learningData = {
+            learnedSentences: new Set() // 学習済みの英文(en)を記録する
+        };
         
         const RANKS = [
             { id: 'S', name: 'Rank S (最重要)', description: 'これだけは押さえたい必須表現' },
@@ -96,16 +114,28 @@
             { id: 'B', name: 'Rank B (応用)', description: '差がつく丁寧・応用表現' },
             { id: 'C', name: 'Rank C (発展)', description: '交渉やプレゼンで役立つ高度な表現' },
         ];
+        const SCENES = ['会議', 'メール', '電話応対', 'プレゼンテーション', '交渉', '同僚との会話', '不具合・問題解決'];
 
         // --- 初期化処理 ---
         function initialize() {
-            renderRankSelection();
+            loadLearningData();
+            renderAllSelections();
+            
             actionBtn.addEventListener('click', onActionBtnClick);
-            backToRanksBtn.addEventListener('click', showRankSelectionView);
+            backToSelectionBtn.addEventListener('click', showSelectionView);
             randomDrillBtn.addEventListener('click', () => startPractice({ type: 'random' }));
+            tabRank.addEventListener('click', () => switchTab('rank'));
+            tabScene.addEventListener('click', () => switchTab('scene'));
+            
+            switchTab('rank'); // 初期タブ
         }
 
         // --- 画面描画 ---
+        function renderAllSelections() {
+            renderRankSelection();
+            renderSceneSelection();
+        }
+
         function renderRankSelection() {
             rankList.innerHTML = '';
             const allSentences = Object.values(sentenceDatabase).flat();
@@ -113,6 +143,8 @@
             RANKS.forEach(rank => {
                 const sentencesInRank = allSentences.filter(s => s.rank === rank.id);
                 const totalInRank = sentencesInRank.length;
+                const learnedCount = sentencesInRank.filter(s => learningData.learnedSentences.has(s.en)).length;
+                const progressPercentage = totalInRank > 0 ? (learnedCount / totalInRank) * 100 : 0;
 
                 const button = document.createElement('button');
                 button.className = "btn text-left p-4 rounded-lg shadow transition-all";
@@ -122,53 +154,102 @@
                 if (totalInRank > 0) {
                     button.classList.add('bg-white', 'hover:bg-gray-50', 'hover:shadow-md');
                     button.innerHTML = `
-                        <div class="font-bold text-xl text-blue-600">${rank.name}</div>
+                        <div class="flex justify-between items-center">
+                           <div class="font-bold text-xl text-blue-600">${rank.name}</div>
+                           <div class="text-sm text-gray-600">${learnedCount} / ${totalInRank}</div>
+                        </div>
                         <div class="text-sm text-gray-600 mt-1">${rank.description}</div>
-                        <div class="text-xs text-gray-500 mt-2">例文: ${totalInRank}件</div>
+                        <div class="mt-2 progress-bar h-2 w-full"><div class="progress-bar-inner" style="width: ${progressPercentage}%;"></div></div>
                     `;
                 } else {
                     button.classList.add('bg-gray-200', 'text-gray-500', 'cursor-not-allowed');
-                    button.innerHTML = `
-                        <div class="font-bold text-xl text-gray-400">${rank.name}</div>
-                        <div class="text-sm text-gray-400 mt-1">（準備中）</div>
-                    `;
+                    button.innerHTML = `<div class="font-bold text-xl text-gray-400">${rank.name}</div><div class="text-sm text-gray-400 mt-1">（準備中）</div>`;
                     button.disabled = true;
                 }
                 rankList.appendChild(button);
             });
         }
+
+        function renderSceneSelection() {
+            sceneList.innerHTML = '';
+            const allSentences = Object.values(sentenceDatabase).flat();
+            SCENES.forEach(sceneName => {
+                const sentencesInScene = allSentences.filter(s => s.scene === sceneName);
+                const totalInScene = sentencesInScene.length;
+                const learnedCount = sentencesInScene.filter(s => learningData.learnedSentences.has(s.en)).length;
+                const progressPercentage = totalInScene > 0 ? (learnedCount / totalInScene) * 100 : 0;
+
+                const button = document.createElement('button');
+                button.className = "btn text-left p-4 rounded-lg shadow transition-all";
+                button.dataset.type = 'scene';
+                button.dataset.value = sceneName;
+
+                if (totalInScene > 0) {
+                     button.classList.add('bg-white', 'hover:bg-gray-50', 'hover:shadow-md');
+                     button.innerHTML = `
+                        <div class="flex justify-between items-center">
+                            <div class="font-bold text-lg">${sceneName}</div>
+                            <div class="text-sm text-gray-600">${learnedCount} / ${totalInScene}</div>
+                        </div>
+                        <div class="mt-2 progress-bar h-2 w-full"><div class="progress-bar-inner" style="width: ${progressPercentage}%;"></div></div>
+                    `;
+                } else {
+                    button.classList.add('bg-gray-200', 'text-gray-500', 'cursor-not-allowed');
+                    button.innerHTML = `<div><div class="font-bold text-lg">${sceneName}</div><div class="text-sm text-gray-400 mt-1">（準備中）</div></div>`;
+                    button.disabled = true;
+                }
+                sceneList.appendChild(button);
+            });
+        }
         
-        // --- 画面遷移 ---
+        // --- 画面遷移とタブ切り替え ---
+        function switchTab(tabName) {
+            if (tabName === 'rank') {
+                tabRank.classList.add('active');
+                tabScene.classList.remove('active');
+                rankList.classList.remove('hidden');
+                sceneList.classList.add('hidden');
+            } else {
+                tabRank.classList.remove('active');
+                tabScene.classList.add('active');
+                rankList.classList.add('hidden');
+                sceneList.classList.remove('hidden');
+            }
+        }
+
         function showDrillView(title) {
-            rankSelectionView.classList.add('hidden');
+            selectionView.classList.add('hidden');
             drillView.classList.remove('hidden');
             drillView.classList.add('flex');
             drillTitle.textContent = title;
         }
 
-        function showRankSelectionView() {
+        function showSelectionView() {
             drillState = 'idle';
             drillView.classList.add('hidden');
             drillView.classList.remove('flex');
-            rankSelectionView.classList.remove('hidden');
-            renderRankSelection();
+            selectionView.classList.remove('hidden');
+            renderAllSelections();
         }
 
         // --- イベントリスナー ---
-        rankList.addEventListener('click', (event) => {
-            const button = event.target.closest('button');
+        rankList.addEventListener('click', (event) => handleListClick(event));
+        sceneList.addEventListener('click', (event) => handleListClick(event));
+
+        function handleListClick(event) {
+             const button = event.target.closest('button');
             if (button && !button.disabled) {
                 const type = button.dataset.type;
                 const value = button.dataset.value;
                 startPractice({ type, value });
             }
-        });
+        }
 
         function onActionBtnClick() {
             if (drillState === 'drilling') {
                 handleDrillAction();
             } else if (drillState === 'finished') {
-                showRankSelectionView();
+                showSelectionView();
             }
         }
 
@@ -184,7 +265,10 @@
                 sourceSentences = allSentences.filter(s => s.rank === drillInfo.value);
                 const rankInfo = RANKS.find(r => r.id === drillInfo.value);
                 drillTitleText = rankInfo.name;
-            } else { // type === 'random'
+            } else if (drillInfo.type === 'scene') {
+                sourceSentences = allSentences.filter(s => s.scene === drillInfo.value);
+                drillTitleText = drillInfo.value;
+            } else { // random
                 sourceSentences = allSentences;
                 drillTitleText = 'ランダム総合演習';
             }
@@ -194,7 +278,12 @@
                 return;
             }
 
-            const shuffled = sourceSentences.sort(() => Math.random() - 0.5);
+            let unlearnedSentences = sourceSentences.filter(s => !learningData.learnedSentences.has(s.en));
+            if (unlearnedSentences.length === 0) {
+                unlearnedSentences = sourceSentences;
+            }
+
+            const shuffled = unlearnedSentences.sort(() => Math.random() - 0.5);
             questionList = shuffled.slice(0, 20);
             
             currentQuestionIndex = 0;
@@ -234,7 +323,30 @@
         function finishPractice() {
             drillState = 'finished';
             japaneseSentenceEl.textContent = "セッション完了！お疲れ様でした！";
-            actionBtn.textContent = "ランク選択へ戻る";
+            actionBtn.textContent = "一覧へ戻る";
+            
+            questionList.forEach(q => learningData.learnedSentences.add(q.en));
+            saveLearningData();
+        }
+
+        // --- データ永続化 ---
+        function saveLearningData() {
+            const dataToSave = {
+                learnedSentences: Array.from(learningData.learnedSentences)
+            };
+            localStorage.setItem('businessEnglishDrillData', JSON.stringify(dataToSave));
+        }
+
+        function loadLearningData() {
+            const savedData = localStorage.getItem('businessEnglishDrillData');
+            if (savedData) {
+                try {
+                    const parsedData = JSON.parse(savedData);
+                    learningData.learnedSentences = new Set(parsedData.learnedSentences || []);
+                } catch (e) {
+                    learningData = { learnedSentences: new Set() };
+                }
+            }
         }
 
         // アプリケーションの初期化
