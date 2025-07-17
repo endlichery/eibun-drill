@@ -3,11 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>英文生成ドリル プロトタイプ</title>
+    <title>ビジネス英語ドリル</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
     
-    <!-- PWA設定ファイルの読み込み -->
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="icon-192.png">
 
@@ -18,34 +17,45 @@
         .btn:active { transform: scale(0.98); }
     </style>
 </head>
-<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen font-sans text-gray-800">
+<body class="bg-gray-100 font-sans text-gray-800">
 
-    <div class="w-full max-w-lg mx-auto p-4 flex flex-col h-screen">
-        <!-- ヘッダー -->
+    <!-- ランク選択画面 -->
+    <div id="rank-selection-view" class="w-full max-w-lg mx-auto p-4">
         <header class="text-center py-4">
-            <h1 class="text-2xl font-bold">英文生成ドリル</h1>
+            <h1 class="text-2xl font-bold">ビジネス英語ドリル</h1>
+            <p class="text-gray-600 mt-1">挑戦する重要度ランクを選択してください</p>
         </header>
 
-        <!-- メインの練習エリア -->
-        <main class="flex-grow flex flex-col justify-center">
-            <!-- 問題表示エリア -->
-            <div id="quiz-area" class="bg-white rounded-xl shadow-lg p-6 min-h-[150px] flex justify-center items-center mb-6">
-                <p id="japanese-sentence" class="text-xl md:text-2xl font-medium text-center">「練習スタート！」を押してください</p>
-            </div>
+        <main id="rank-list" class="grid grid-cols-1 gap-4">
+            <!-- JavaScriptによってランクボタンがここに挿入されます -->
+        </main>
+        
+        <div class="mt-6 text-center">
+             <button id="random-drill-btn" class="btn bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-700">
+                腕試し！全範囲からランダム演習
+            </button>
+        </div>
+    </div>
 
-            <!-- 答え表示エリア -->
+    <!-- 練習画面 (最初は非表示) -->
+    <div id="drill-view" class="w-full max-w-lg mx-auto p-4 flex-col h-screen hidden">
+        <header class="text-center py-4 flex items-center">
+            <button id="back-to-ranks-btn" class="btn bg-gray-200 text-gray-700 px-3 py-1 rounded-md hover:bg-gray-300">&lt; 戻る</button>
+            <h1 id="drill-title" class="text-xl font-bold flex-grow"></h1>
+        </header>
+
+        <main class="flex-grow flex flex-col justify-center">
+            <div id="quiz-area" class="bg-white rounded-xl shadow-lg p-6 min-h-[150px] flex justify-center items-center mb-6">
+                <p id="japanese-sentence" class="text-xl md:text-2xl font-medium text-center"></p>
+            </div>
             <div id="answer-area" class="bg-blue-100 border-2 border-dashed border-blue-300 rounded-xl p-6 min-h-[100px] flex justify-center items-center mb-8 opacity-0 transition-opacity duration-300">
                 <p id="english-sentence" class="text-lg md:text-xl font-bold text-blue-800 text-center"></p>
             </div>
         </main>
 
-        <!-- フッターの操作ボタン -->
         <footer class="py-4">
-            <button id="action-btn" class="btn w-full bg-blue-500 text-white font-bold py-4 rounded-lg shadow-md hover:bg-blue-600 transition-all focus:ring-blue-400 hidden">
+            <button id="action-btn" class="btn w-full bg-blue-500 text-white font-bold py-4 rounded-lg shadow-md hover:bg-blue-600 transition-all focus:ring-blue-400">
                 答えを見る
-            </button>
-             <button id="start-btn" class="btn w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-lg shadow-lg hover:bg-green-700 transition-all focus:ring-green-400">
-                練習スタート！
             </button>
         </footer>
     </div>
@@ -54,58 +64,144 @@
         // サービスワーカーの登録
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./service-worker.js').then(registration => {
-                    console.log('ServiceWorker registration successful with scope: ', registration.scope);
-                }).catch(error => {
-                    console.log('ServiceWorker registration failed: ', error);
-                });
+                navigator.serviceWorker.register('./service-worker.js');
             });
         }
     </script>
     
-    <!-- 最初にデータベースを読み込む -->
     <script src="database.js"></script>
     
-    <!-- アプリ本体のロジック -->
     <script>
         // --- DOM要素の取得 ---
+        const rankSelectionView = document.getElementById('rank-selection-view');
+        const drillView = document.getElementById('drill-view');
+        const rankList = document.getElementById('rank-list');
+        const drillTitle = document.getElementById('drill-title');
+        const backToRanksBtn = document.getElementById('back-to-ranks-btn');
         const japaneseSentenceEl = document.getElementById('japanese-sentence');
         const englishSentenceEl = document.getElementById('english-sentence');
         const answerAreaEl = document.getElementById('answer-area');
         const actionBtn = document.getElementById('action-btn');
-        const startBtn = document.getElementById('start-btn');
+        const randomDrillBtn = document.getElementById('random-drill-btn');
 
         // --- アプリの状態管理 ---
         let questionList = [];
         let currentQuestionIndex = 0;
         let isAnswerShown = false;
+        let drillState = 'idle';
+        
+        const RANKS = [
+            { id: 'S', name: 'Rank S (最重要)', description: 'これだけは押さえたい必須表現' },
+            { id: 'A', name: 'Rank A (高頻度)', description: '日常業務で頻繁に使う表現' },
+            { id: 'B', name: 'Rank B (応用)', description: '差がつく丁寧・応用表現' },
+            { id: 'C', name: 'Rank C (発展)', description: '交渉やプレゼンで役立つ高度な表現' },
+        ];
+
+        // --- 初期化処理 ---
+        function initialize() {
+            renderRankSelection();
+            actionBtn.addEventListener('click', onActionBtnClick);
+            backToRanksBtn.addEventListener('click', showRankSelectionView);
+            randomDrillBtn.addEventListener('click', () => startPractice({ type: 'random' }));
+        }
+
+        // --- 画面描画 ---
+        function renderRankSelection() {
+            rankList.innerHTML = '';
+            const allSentences = Object.values(sentenceDatabase).flat();
+
+            RANKS.forEach(rank => {
+                const sentencesInRank = allSentences.filter(s => s.rank === rank.id);
+                const totalInRank = sentencesInRank.length;
+
+                const button = document.createElement('button');
+                button.className = "btn text-left p-4 rounded-lg shadow transition-all";
+                button.dataset.type = 'rank';
+                button.dataset.value = rank.id;
+
+                if (totalInRank > 0) {
+                    button.classList.add('bg-white', 'hover:bg-gray-50', 'hover:shadow-md');
+                    button.innerHTML = `
+                        <div class="font-bold text-xl text-blue-600">${rank.name}</div>
+                        <div class="text-sm text-gray-600 mt-1">${rank.description}</div>
+                        <div class="text-xs text-gray-500 mt-2">例文: ${totalInRank}件</div>
+                    `;
+                } else {
+                    button.classList.add('bg-gray-200', 'text-gray-500', 'cursor-not-allowed');
+                    button.innerHTML = `
+                        <div class="font-bold text-xl text-gray-400">${rank.name}</div>
+                        <div class="text-sm text-gray-400 mt-1">（準備中）</div>
+                    `;
+                    button.disabled = true;
+                }
+                rankList.appendChild(button);
+            });
+        }
+        
+        // --- 画面遷移 ---
+        function showDrillView(title) {
+            rankSelectionView.classList.add('hidden');
+            drillView.classList.remove('hidden');
+            drillView.classList.add('flex');
+            drillTitle.textContent = title;
+        }
+
+        function showRankSelectionView() {
+            drillState = 'idle';
+            drillView.classList.add('hidden');
+            drillView.classList.remove('flex');
+            rankSelectionView.classList.remove('hidden');
+            renderRankSelection();
+        }
 
         // --- イベントリスナー ---
-        startBtn.addEventListener('click', startPractice);
-        actionBtn.addEventListener('click', handleAction);
-
-        /**
-         * 練習を開始する
-         */
-        function startPractice() {
-            // データベースからランダムに20問選ぶ（重複ありでシンプルに）
-            questionList = [];
-            for (let i = 0; i < 20; i++) {
-                const randomIndex = Math.floor(Math.random() * sentenceDatabase.length);
-                questionList.push(sentenceDatabase[randomIndex]);
+        rankList.addEventListener('click', (event) => {
+            const button = event.target.closest('button');
+            if (button && !button.disabled) {
+                const type = button.dataset.type;
+                const value = button.dataset.value;
+                startPractice({ type, value });
             }
+        });
+
+        function onActionBtnClick() {
+            if (drillState === 'drilling') {
+                handleDrillAction();
+            } else if (drillState === 'finished') {
+                showRankSelectionView();
+            }
+        }
+
+        // --- メインロジック ---
+        function startPractice(drillInfo) {
+            drillState = 'drilling';
+            let sourceSentences = [];
+            let drillTitleText = '';
+
+            const allSentences = Object.values(sentenceDatabase).flat();
+
+            if (drillInfo.type === 'rank') {
+                sourceSentences = allSentences.filter(s => s.rank === drillInfo.value);
+                const rankInfo = RANKS.find(r => r.id === drillInfo.value);
+                drillTitleText = rankInfo.name;
+            } else { // type === 'random'
+                sourceSentences = allSentences;
+                drillTitleText = 'ランダム総合演習';
+            }
+            
+            if (sourceSentences.length === 0) {
+                alert("このカテゴリにはまだ例文がありません。");
+                return;
+            }
+
+            const shuffled = sourceSentences.sort(() => Math.random() - 0.5);
+            questionList = shuffled.slice(0, 20);
             
             currentQuestionIndex = 0;
             displayQuestion();
-
-            // UIの更新
-            startBtn.classList.add('hidden');
-            actionBtn.classList.remove('hidden');
+            showDrillView(drillTitleText);
         }
 
-        /**
-         * 現在の問題を画面に表示する
-         */
         function displayQuestion() {
             if (currentQuestionIndex >= questionList.length) {
                 finishPractice();
@@ -115,41 +211,34 @@
             japaneseSentenceEl.textContent = question.jp;
             englishSentenceEl.textContent = question.en;
             
-            // 答えを隠してボタンをリセット
             isAnswerShown = false;
             answerAreaEl.classList.add('opacity-0');
             actionBtn.textContent = '答えを見る';
-            actionBtn.classList.replace('bg-gray-700', 'bg-blue-500');
-            actionBtn.classList.replace('hover:bg-gray-800', 'hover:bg-blue-600');
+            actionBtn.classList.remove('bg-gray-700');
+            actionBtn.classList.add('bg-blue-500');
         }
 
-        /**
-         * メインボタンの操作を処理する
-         */
-        function handleAction() {
+        function handleDrillAction() {
             if (!isAnswerShown) {
-                // 答えを表示する
                 answerAreaEl.classList.remove('opacity-0');
                 isAnswerShown = true;
                 actionBtn.textContent = '次の問題へ';
-                actionBtn.classList.replace('bg-blue-500', 'bg-gray-700');
-                actionBtn.classList.replace('hover:bg-blue-600', 'hover:bg-gray-800');
+                actionBtn.classList.remove('bg-blue-500');
+                actionBtn.classList.add('bg-gray-700');
             } else {
-                // 次の問題へ進む
                 currentQuestionIndex++;
                 displayQuestion();
             }
         }
         
-        /**
-         * 練習を終了する
-         */
         function finishPractice() {
-            japaneseSentenceEl.textContent = "練習お疲れ様でした！";
-            actionBtn.classList.add('hidden');
-            startBtn.textContent = "もう一度挑戦する";
-            startBtn.classList.remove('hidden');
+            drillState = 'finished';
+            japaneseSentenceEl.textContent = "セッション完了！お疲れ様でした！";
+            actionBtn.textContent = "ランク選択へ戻る";
         }
+
+        // アプリケーションの初期化
+        initialize();
     </script>
 </body>
 </html>
