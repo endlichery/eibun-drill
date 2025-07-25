@@ -37,11 +37,7 @@
 
         <main class="flex-grow flex flex-col justify-center">
             <div id="quiz-area" class="bg-white rounded-xl shadow-lg p-6 min-h-[150px] flex flex-col justify-center items-center mb-6">
-                <!-- 表現拡張用の表示エリアを追加 -->
-                <div id="expansion-info" class="text-center mb-2 hidden">
-                    <p id="core-expression-jp" class="text-sm text-gray-500"></p>
-                    <p id="add-info-jp" class="text-lg font-bold text-blue-600"></p>
-                </div>
+                <!-- ★★★ このエリアは、基本文を表示する必要がなくなったため、構造をシンプルに戻します ★★★ -->
                 <p id="japanese-sentence" class="text-xl md:text-2xl font-medium text-center"></p>
             </div>
             
@@ -75,9 +71,6 @@
         const englishSentenceSimpleEl = document.getElementById('english-sentence-simple');
         const englishSentenceProEl = document.getElementById('english-sentence-pro');
         const footer = document.getElementById('footer');
-        const expansionInfo = document.getElementById('expansion-info');
-        const coreExpressionJpEl = document.getElementById('core-expression-jp');
-        const addInfoJpEl = document.getElementById('add-info-jp');
         const simpleAnswerBlock = document.getElementById('simple-answer-block');
         const proAnswerBlock = document.getElementById('pro-answer-block');
 
@@ -161,7 +154,6 @@
             drillState = 'core_question';
             const question = questionList[currentQuestionIndex];
             
-            expansionInfo.classList.add('hidden');
             japaneseSentenceEl.textContent = question.jp_pro;
             englishSentenceSimpleEl.textContent = question.en_simple;
             englishSentenceProEl.textContent = question.en_pro;
@@ -177,14 +169,14 @@
             const coreQuestion = questionList[currentQuestionIndex];
             const variation = coreQuestion.variations[currentVariationIndex];
 
-            japaneseSentenceEl.textContent = '';
-            expansionInfo.classList.remove('hidden');
-            coreExpressionJpEl.textContent = `[基本] ${coreQuestion.jp_pro}`;
-            addInfoJpEl.textContent = `[追加] + ${variation.add_jp}`;
+            // ★★★ここからが修正箇所★★★
+            // 完成された日本語文（jp_pro）を直接表示する
+            japaneseSentenceEl.textContent = variation.jp_pro;
+            // ★★★ここまでが修正箇所★★★
             
-            englishSentenceSimpleEl.textContent = variation.en_simple || variation.en_pro; // simpleがなければproを使う
+            englishSentenceSimpleEl.textContent = variation.en_simple;
             englishSentenceProEl.textContent = variation.en_pro;
-            simpleAnswerBlock.classList.toggle('hidden', !variation.en_simple);
+            simpleAnswerBlock.classList.remove('hidden');
             proAnswerBlock.classList.remove('hidden');
 
             answerAreaEl.classList.add('opacity-0');
@@ -194,7 +186,6 @@
         function finishSession() {
             drillState = 'finished';
             japaneseSentenceEl.textContent = "セッション完了！お疲れ様でした！";
-            expansionInfo.classList.add('hidden');
             answerAreaEl.classList.add('opacity-0');
             renderButtons();
         }
