@@ -37,7 +37,6 @@
 
         <main class="flex-grow flex flex-col justify-center">
             <div id="quiz-area" class="bg-white rounded-xl shadow-lg p-6 min-h-[150px] flex flex-col justify-center items-center mb-6">
-                <!-- ★★★ このエリアは、基本文を表示する必要がなくなったため、構造をシンプルに戻します ★★★ -->
                 <p id="japanese-sentence" class="text-xl md:text-2xl font-medium text-center"></p>
             </div>
             
@@ -78,7 +77,7 @@
         let questionList = [];
         let currentQuestionIndex = 0;
         let currentVariationIndex = 0;
-        let drillState = 'idle'; // 'idle', 'core_question', 'core_answer', 'expansion_question', 'expansion_answer'
+        let drillState = 'idle';
         
         const SCENES = {
             "設計・仕様書": [],
@@ -154,13 +153,15 @@
             drillState = 'core_question';
             const question = questionList[currentQuestionIndex];
             
+            // ★★★ 修正点: 最初に答えを隠す ★★★
+            answerAreaEl.classList.add('opacity-0');
+
             japaneseSentenceEl.textContent = question.jp_pro;
             englishSentenceSimpleEl.textContent = question.en_simple;
             englishSentenceProEl.textContent = question.en_pro;
             simpleAnswerBlock.classList.remove('hidden');
             proAnswerBlock.classList.remove('hidden');
             
-            answerAreaEl.classList.add('opacity-0');
             renderButtons();
         }
         
@@ -169,17 +170,16 @@
             const coreQuestion = questionList[currentQuestionIndex];
             const variation = coreQuestion.variations[currentVariationIndex];
 
-            // ★★★ここからが修正箇所★★★
-            // 完成された日本語文（jp_pro）を直接表示する
+            // ★★★ 修正点: 最初に答えを隠す ★★★
+            answerAreaEl.classList.add('opacity-0');
+
             japaneseSentenceEl.textContent = variation.jp_pro;
-            // ★★★ここまでが修正箇所★★★
             
             englishSentenceSimpleEl.textContent = variation.en_simple;
             englishSentenceProEl.textContent = variation.en_pro;
             simpleAnswerBlock.classList.remove('hidden');
             proAnswerBlock.classList.remove('hidden');
 
-            answerAreaEl.classList.add('opacity-0');
             renderButtons();
         }
 
