@@ -13,10 +13,8 @@
     <style>
         body { touch-action: manipulation; }
         .btn:focus { outline: none; ring: 3px; ring-offset: 2px; }
-        .btn { transition: background-color 0.2s ease-in-out, transform 0.1s ease-in-out; }
+        .btn { transition: all 0.2s ease-in-out; }
         .btn:active { transform: scale(0.98); }
-        .progress-bar { background-color: #e0e0e0; border-radius: 9999px; overflow: hidden; }
-        .progress-bar-inner { background-color: #4299e1; height: 100%; transition: width 0.5s ease-in-out; }
     </style>
 </head>
 <body class="bg-gray-100 font-sans text-gray-800">
@@ -27,17 +25,7 @@
             <h1 class="text-2xl font-bold">自動車開発者向け英語ドリル</h1>
             <p class="text-gray-600 mt-1">学習したいシーンを選択してください</p>
         </header>
-
-        <main>
-            <!-- シーン別リスト -->
-            <div id="scene-list" class="grid grid-cols-1 gap-4 mt-4"></div>
-        </main>
-        
-        <div class="mt-6 text-center">
-             <button id="random-drill-btn" class="btn bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-700">
-                腕試し！全範囲からランダム演習
-            </button>
-        </div>
+        <main id="scene-list" class="grid grid-cols-1 gap-4 mt-4"></main>
     </div>
 
     <!-- 練習画面 (最初は非表示) -->
@@ -48,32 +36,33 @@
         </header>
 
         <main class="flex-grow flex flex-col justify-center">
-            <div id="quiz-area" class="bg-white rounded-xl shadow-lg p-6 min-h-[150px] flex justify-center items-center mb-6">
+            <div id="quiz-area" class="bg-white rounded-xl shadow-lg p-6 min-h-[150px] flex flex-col justify-center items-center mb-6">
+                <!-- 表現拡張用の表示エリアを追加 -->
+                <div id="expansion-info" class="text-center mb-2 hidden">
+                    <p id="core-expression-jp" class="text-sm text-gray-500"></p>
+                    <p id="add-info-jp" class="text-lg font-bold text-blue-600"></p>
+                </div>
                 <p id="japanese-sentence" class="text-xl md:text-2xl font-medium text-center"></p>
             </div>
-            <div id="answer-area" class="bg-blue-100 border-2 border-dashed border-blue-300 rounded-xl p-6 min-h-[100px] flex justify-center items-center mb-8 opacity-0 transition-opacity duration-300">
-                <p id="english-sentence" class="text-lg md:text-xl font-bold text-blue-800 text-center"></p>
+            
+            <div id="answer-area" class="bg-white border rounded-xl p-4 min-h-[150px] flex flex-col justify-center mb-8 opacity-0 transition-opacity duration-300">
+                <div id="simple-answer-block">
+                    <span class="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded-full">SIMPLE</span>
+                    <p id="english-sentence-simple" class="text-lg font-medium text-gray-800 mt-1"></p>
+                </div>
+                <div id="pro-answer-block" class="border-t border-gray-200 pt-3 mt-3">
+                    <span class="text-xs font-bold text-gray-600 bg-gray-200 px-2 py-1 rounded-full">PROFESSIONAL</span>
+                    <p id="english-sentence-pro" class="text-lg font-semibold text-gray-900 mt-1"></p>
+                </div>
             </div>
         </main>
 
-        <footer class="py-4">
-            <button id="action-btn" class="btn w-full bg-blue-500 text-white font-bold py-4 rounded-lg shadow-md hover:bg-blue-600 transition-all focus:ring-blue-400">
-                答えを見る
-            </button>
+        <footer id="footer" class="py-4">
+            <!-- ボタンはJSで動的に生成 -->
         </footer>
     </div>
 
-    <script>
-        // サービスワーカーの登録
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./service-worker.js');
-            });
-        }
-    </script>
-    
     <script src="database.js"></script>
-    
     <script>
         // --- DOM要素の取得 ---
         const selectionView = document.getElementById('selection-view');
@@ -82,64 +71,46 @@
         const drillTitle = document.getElementById('drill-title');
         const backToSelectionBtn = document.getElementById('back-to-selection-btn');
         const japaneseSentenceEl = document.getElementById('japanese-sentence');
-        const englishSentenceEl = document.getElementById('english-sentence');
         const answerAreaEl = document.getElementById('answer-area');
-        const actionBtn = document.getElementById('action-btn');
-        const randomDrillBtn = document.getElementById('random-drill-btn');
+        const englishSentenceSimpleEl = document.getElementById('english-sentence-simple');
+        const englishSentenceProEl = document.getElementById('english-sentence-pro');
+        const footer = document.getElementById('footer');
+        const expansionInfo = document.getElementById('expansion-info');
+        const coreExpressionJpEl = document.getElementById('core-expression-jp');
+        const addInfoJpEl = document.getElementById('add-info-jp');
+        const simpleAnswerBlock = document.getElementById('simple-answer-block');
+        const proAnswerBlock = document.getElementById('pro-answer-block');
 
         // --- アプリの状態管理 ---
         let questionList = [];
         let currentQuestionIndex = 0;
-        let isAnswerShown = false;
-        let drillState = 'idle';
-        let learningData = {
-            learnedSentences: new Set() // 学習済みの英文(en)を記録する
-        };
+        let currentVariationIndex = 0;
+        let drillState = 'idle'; // 'idle', 'core_question', 'core_answer', 'expansion_question', 'expansion_answer'
         
-        const SCENES = ['会議', 'メール', '電話応対', 'プレゼンテーション', '交渉', '同僚との会話', '不具合・問題解決', '設計・仕様書', 'レビュー・会議', 'テスト・検証', 'サプライヤー・他部署連携'];
+        const SCENES = {
+            "設計・仕様書": [],
+            "レビュー・会議": ["設計レビューでの質疑応答"],
+            "不具合・問題解決": ["不具合報告会議"],
+        };
 
         // --- 初期化処理 ---
         function initialize() {
-            loadLearningData();
             renderSceneSelection();
-            
-            actionBtn.addEventListener('click', onActionBtnClick);
             backToSelectionBtn.addEventListener('click', showSelectionView);
-            randomDrillBtn.addEventListener('click', () => startPractice({ type: 'random' }));
-            sceneList.addEventListener('click', (event) => handleListClick(event));
         }
 
         // --- 画面描画 ---
         function renderSceneSelection() {
             sceneList.innerHTML = '';
             const allSentences = Object.values(sentenceDatabase).flat();
-            SCENES.forEach(sceneName => {
-                const sentencesInScene = allSentences.filter(s => s.scene === sceneName || s.mainScene === sceneName);
-                const totalInScene = sentencesInScene.length;
-                const learnedCount = sentencesInScene.filter(s => learningData.learnedSentences.has(s.en)).length;
-                const progressPercentage = totalInScene > 0 ? (learnedCount / totalInScene) * 100 : 0;
-
+            
+            for (const mainScene in SCENES) {
                 const button = document.createElement('button');
-                button.className = "btn text-left p-4 rounded-lg shadow transition-all";
-                button.dataset.type = 'scene';
-                button.dataset.value = sceneName;
-
-                if (totalInScene > 0) {
-                     button.classList.add('bg-white', 'hover:bg-gray-50', 'hover:shadow-md');
-                     button.innerHTML = `
-                        <div class="flex justify-between items-center">
-                            <div class="font-bold text-lg">${sceneName}</div>
-                            <div class="text-sm text-gray-600">${learnedCount} / ${totalInScene}</div>
-                        </div>
-                        <div class="mt-2 progress-bar h-2 w-full"><div class="progress-bar-inner" style="width: ${progressPercentage}%;"></div></div>
-                    `;
-                } else {
-                    button.classList.add('bg-gray-200', 'text-gray-500', 'cursor-not-allowed');
-                    button.innerHTML = `<div><div class="font-bold text-lg">${sceneName}</div><div class="text-sm text-gray-400 mt-1">（準備中）</div></div>`;
-                    button.disabled = true;
-                }
+                button.className = "btn text-left p-4 rounded-lg shadow bg-white hover:bg-gray-50 hover:shadow-md";
+                button.dataset.mainScene = mainScene;
+                button.innerHTML = `<div class="font-bold text-xl text-blue-600">${mainScene}</div>`;
                 sceneList.appendChild(button);
-            });
+            }
         }
         
         // --- 画面遷移 ---
@@ -159,113 +130,133 @@
         }
 
         // --- イベントリスナー ---
-        function handleListClick(event) {
-             const button = event.target.closest('button');
-            if (button && !button.disabled) {
-                const type = button.dataset.type;
-                const value = button.dataset.value;
-                startPractice({ type, value });
+        sceneList.addEventListener('click', (event) => {
+            const button = event.target.closest('button');
+            if (button) {
+                startPractice({ type: 'mainScene', value: button.dataset.mainScene });
             }
-        }
-
-        function onActionBtnClick() {
-            if (drillState === 'drilling') {
-                handleDrillAction();
-            } else if (drillState === 'finished') {
-                showSelectionView();
-            }
-        }
+        });
 
         // --- メインロジック ---
         function startPractice(drillInfo) {
-            drillState = 'drilling';
-            let sourceSentences = [];
-            let drillTitleText = '';
-
             const allSentences = Object.values(sentenceDatabase).flat();
-
-            if (drillInfo.type === 'scene') {
-                sourceSentences = allSentences.filter(s => s.scene === drillInfo.value || s.mainScene === drillInfo.value);
-                drillTitleText = drillInfo.value;
-            } else { // random
-                sourceSentences = allSentences;
-                drillTitleText = 'ランダム総合演習';
-            }
+            let sourceSentences = allSentences.filter(s => s.mainScene === drillInfo.value);
             
             if (sourceSentences.length === 0) {
                 alert("このカテゴリにはまだ例文がありません。");
                 return;
             }
 
-            let unlearnedSentences = sourceSentences.filter(s => !learningData.learnedSentences.has(s.en));
-            if (unlearnedSentences.length === 0) {
-                unlearnedSentences = sourceSentences;
-            }
-
-            const shuffled = unlearnedSentences.sort(() => Math.random() - 0.5);
-            questionList = shuffled.slice(0, 20);
-            
+            questionList = sourceSentences.sort(() => Math.random() - 0.5);
             currentQuestionIndex = 0;
-            displayQuestion();
-            showDrillView(drillTitleText);
+            displayCoreQuestion();
+            showDrillView(drillInfo.value);
         }
 
-        function displayQuestion() {
+        function displayCoreQuestion() {
             if (currentQuestionIndex >= questionList.length) {
-                finishPractice();
+                finishSession();
                 return;
             }
+            drillState = 'core_question';
             const question = questionList[currentQuestionIndex];
-            japaneseSentenceEl.textContent = question.jp;
-            englishSentenceEl.textContent = question.en;
             
-            isAnswerShown = false;
+            expansionInfo.classList.add('hidden');
+            japaneseSentenceEl.textContent = question.jp_pro;
+            englishSentenceSimpleEl.textContent = question.en_simple;
+            englishSentenceProEl.textContent = question.en_pro;
+            simpleAnswerBlock.classList.remove('hidden');
+            proAnswerBlock.classList.remove('hidden');
+            
             answerAreaEl.classList.add('opacity-0');
-            actionBtn.textContent = '答えを見る';
-            actionBtn.classList.remove('bg-gray-700');
-            actionBtn.classList.add('bg-blue-500');
-        }
-
-        function handleDrillAction() {
-            if (!isAnswerShown) {
-                answerAreaEl.classList.remove('opacity-0');
-                isAnswerShown = true;
-                actionBtn.textContent = '次の問題へ';
-                actionBtn.classList.remove('bg-blue-500');
-                actionBtn.classList.add('bg-gray-700');
-            } else {
-                currentQuestionIndex++;
-                displayQuestion();
-            }
+            renderButtons();
         }
         
-        function finishPractice() {
+        function displayExpansionQuestion() {
+            drillState = 'expansion_question';
+            const coreQuestion = questionList[currentQuestionIndex];
+            const variation = coreQuestion.variations[currentVariationIndex];
+
+            japaneseSentenceEl.textContent = '';
+            expansionInfo.classList.remove('hidden');
+            coreExpressionJpEl.textContent = `[基本] ${coreQuestion.jp_pro}`;
+            addInfoJpEl.textContent = `[追加] + ${variation.add_jp}`;
+            
+            englishSentenceSimpleEl.textContent = variation.en_simple || variation.en_pro; // simpleがなければproを使う
+            englishSentenceProEl.textContent = variation.en_pro;
+            simpleAnswerBlock.classList.toggle('hidden', !variation.en_simple);
+            proAnswerBlock.classList.remove('hidden');
+
+            answerAreaEl.classList.add('opacity-0');
+            renderButtons();
+        }
+
+        function finishSession() {
             drillState = 'finished';
             japaneseSentenceEl.textContent = "セッション完了！お疲れ様でした！";
-            actionBtn.textContent = "一覧へ戻る";
+            expansionInfo.classList.add('hidden');
+            answerAreaEl.classList.add('opacity-0');
+            renderButtons();
+        }
+
+        // --- ボタンの制御 ---
+        function renderButtons() {
+            footer.innerHTML = '';
             
-            questionList.forEach(q => learningData.learnedSentences.add(q.en));
-            saveLearningData();
-        }
+            if (drillState === 'core_question' || drillState === 'expansion_question') {
+                const btn = createButton('答えを見る', 'bg-blue-500', 'hover:bg-blue-600', () => {
+                    drillState = (drillState === 'core_question') ? 'core_answer' : 'expansion_answer';
+                    answerAreaEl.classList.remove('opacity-0');
+                    renderButtons();
+                });
+                footer.appendChild(btn);
+            } else if (drillState === 'core_answer') {
+                const coreQuestion = questionList[currentQuestionIndex];
+                const hasVariations = coreQuestion.variations && coreQuestion.variations.length > 0;
 
-        // --- データ永続化 ---
-        function saveLearningData() {
-            const dataToSave = {
-                learnedSentences: Array.from(learningData.learnedSentences)
-            };
-            localStorage.setItem('businessEnglishDrillData', JSON.stringify(dataToSave));
-        }
-
-        function loadLearningData() {
-            const savedData = localStorage.getItem('businessEnglishDrillData');
-            if (savedData) {
-                try {
-                    const parsedData = JSON.parse(savedData);
-                    learningData.learnedSentences = new Set(parsedData.learnedSentences || []);
-                } catch (e) {
-                    learningData = { learnedSentences: new Set() };
+                const btnGroup = document.createElement('div');
+                btnGroup.className = hasVariations ? 'grid grid-cols-2 gap-4' : 'grid grid-cols-1';
+                
+                if (hasVariations) {
+                    const expandBtn = createButton('表現拡張へ', 'bg-green-600', 'hover:bg-green-700', () => {
+                        currentVariationIndex = 0;
+                        displayExpansionQuestion();
+                    });
+                    btnGroup.appendChild(expandBtn);
                 }
+                const nextBtn = createButton('次の問題へ', 'bg-gray-700', 'hover:bg-gray-800', () => {
+                    currentQuestionIndex++;
+                    displayCoreQuestion();
+                });
+                btnGroup.appendChild(nextBtn);
+                footer.appendChild(btnGroup);
+
+            } else if (drillState === 'expansion_answer') {
+                const coreQuestion = questionList[currentQuestionIndex];
+                const hasMoreVariations = currentVariationIndex < coreQuestion.variations.length - 1;
+                
+                const btn = createButton(hasMoreVariations ? '次のバリエーションへ' : '次のコア表現へ', 'bg-gray-700', 'hover:bg-gray-800', () => {
+                    if (hasMoreVariations) {
+                        currentVariationIndex++;
+                        displayExpansionQuestion();
+                    } else {
+                        currentQuestionIndex++;
+                        displayCoreQuestion();
+                    }
+                });
+                footer.appendChild(btn);
+            } else if (drillState === 'finished') {
+                const btn = createButton('シーン選択へ戻る', 'bg-gray-700', 'hover:bg-gray-800', showSelectionView);
+                footer.appendChild(btn);
             }
+        }
+
+        function createButton(text, bgColor, hoverColor, onClick) {
+            const button = document.createElement('button');
+            button.className = `btn w-full text-white font-bold py-4 rounded-lg shadow-md ${bgColor} ${hoverColor}`;
+            button.textContent = text;
+            button.addEventListener('click', onClick);
+            return button;
         }
 
         // アプリケーションの初期化
